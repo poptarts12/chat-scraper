@@ -1,0 +1,122 @@
+/* extension/popup/popup.css */
+/* Reset basic spacing */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 300px;
+  font-family: Arial, sans-serif;
+  background-color: #f9f9f9;
+}
+
+.popup-container {
+  width: 90%;
+  max-width: 260px;
+  margin: 20px auto;
+  padding: 15px;
+  background-color: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.popup-container h1 {
+  font-size: 1.2em;
+  text-align: center;
+  margin-bottom: 12px;
+  color: #333333;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.9em;
+  color: #555555;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 0.95em;
+  border: 1px solid #cccccc;
+  border-radius: 4px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+/* Submit button */
+button[type="submit"] {
+  width: 100%;
+  padding: 8px;
+  font-size: 1em;
+  background-color: #0066cc;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button[type="submit"]:hover {
+  background-color: #005bb5;
+}
+
+#feedback {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #cc0000; /* error color */
+  min-height: 1.2em;
+  text-align: center;
+}
+
+/* green for success */
+#feedback.success {
+  color: #006600;
+}
+
+/* Logged-in view */
+#loggedIn {
+  display: none; /* shown via JS */
+  margin-top: 15px;
+  text-align: center;
+}
+
+#loggedIn h1 {
+  font-size: 1.1em;
+  color: #333333;
+  margin-bottom: 8px;
+}
+
+#loggedIn p {
+  font-size: 0.95em;
+  color: #555555;
+  margin-bottom: 12px;
+}
+
+/* Logout button */
+#logoutBtn {
+  width: 100%;
+  padding: 8px;
+  font-size: 1em;
+  background-color: #cc0000;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+#logoutBtn:hover {
+  background-color: #b30000;
+}
