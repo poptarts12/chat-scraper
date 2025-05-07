@@ -7,7 +7,7 @@
  * pulling auth info from chrome.storage.local.
  */
 
-import { postData, putData } from './apiClient.js';
+import { postData } from './apiClient.js';  // no need for putData any more
 
 console.log('[SW] background.js loaded');
 
@@ -53,12 +53,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ status: 'error', message: 'Not authenticated' });
         return;
       }
-      putData(
-        `${BACKEND_BASE}/conversations/${currentConversationId}/messages`,
+      postData(
+        // send to the top‐level /messages endpoint
+        `${BACKEND_BASE}/messages`,
         {
-          sender_type: message.data.sender_type,
-          content: message.data.content,
-          order_index: message.data.order_index
+          conversation_id: currentConversationId,
+          sender_type:  message.data.sender_type,
+          content:      message.data.content,
+          order_index:  message.data.order_index
         },
         token
       )
