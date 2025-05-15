@@ -1,72 +1,170 @@
-// extension/content/content_script.js
-
 /**
- * content_script.js
- * 
- * Injected into chat.openai.com pages.
- * Scrapes every message bubble and relays it to background.js,
- * ensuring the first message only sends after the conversation is created.
+ * content/content_script.js
+ * – Single‐file bubble logger for ChatGPT
+ * – No ES modules, no bundling
  */
 
-console.log('[CS] content_script.js injected — scraper enabled');
+console.log('[CS] content_script.js injected — starting ordered logger');
 
-let seenBubbles = 0;
+// at top, compute ID from URL
+function getConversationIdFromUrl() {
+  return window.location.pathname
+    .split('/c/')[1]
+    ?.split('/')[0]
+    || null;
+}
 
-// Helper to send messages to the SW, with optional callback
-function send(type, data, callback) {
-  chrome.runtime.sendMessage({ type, data }, resp => {
-    console.log(`[CS] ${type} resp`, resp);
-    if (callback) callback(resp);
+let conversationId = getConversationIdFromUrl();
+if (!conversationId) {
+  console.error('[CS] no conversation ID in URL, aborting logger');
+  throw new Error('No conversation ID');
+}
+
+// helper to notify SW & reset state
+function startConversation(id) {
+  console.log('[CS] new conversation detected:', id);
+  // clear out anything we saw before
+  seenIds.clear();
+  queue.length = 0;
+  processing = false;
+
+  conversationId = id;
+  // tell background to create/activate this conversation
+  chrome.runtime.sendMessage({
+    type: 'NEW_CHAT',
+    data: { conversation_id: id, title: document.title }
+  });
+  // kick off logging again
+  enqueueNew();
+}
+
+// watch for SPA URL changes
+window.addEventListener('popstate', () => {
+  const newId = getConversationIdFromUrl();
+  if (newId && newId !== conversationId) {
+    startConversation(newId);
+  }
+});
+// monkey-patch pushState so we catch all in-page navigations
+const _pushState = history.pushState;
+history.pushState = function(...args) {
+  _pushState.apply(this, args);
+  window.dispatchEvent(new Event('popstate'));
+};
+
+const STOP_BTN_SEL =
+  '#composer-submit-button[data-testid="stop-button"], button[aria-label="Stop streaming"]';
+
+const seenIds    = new Set();
+const queue      = [];
+let   processing = false;
+
+function getTurns() {
+  return Array.from(
+    document.body.querySelectorAll('article[data-testid^="conversation-turn-"]')
+  );
+}
+
+function extractText(turn) {
+  const copy = turn.cloneNode(true);
+  copy.querySelectorAll('h5.sr-only').forEach(el => el.remove());
+  const md = copy.querySelector('div.prose, div.markdown');
+  if (md) return md.innerText.trim();
+  copy.querySelectorAll('button, svg').forEach(el => el.remove());
+  return copy.innerText.trim();
+}
+
+function getSender(turn) {
+  const author = turn.querySelector('[data-message-author-role]');
+  return author
+    ? author.getAttribute('data-message-author-role')
+    : 'assistant';
+}
+
+function waitForAssistantComplete(turn) {
+  return new Promise(resolve => {
+    const sel = STOP_BTN_SEL;
+    if (!document.querySelector(sel)) {
+      return resolve();
+    }
+    console.log('[CS][debug] Stop button detected — polling for its removal');
+    const interval = setInterval(() => {
+      if (!document.querySelector(sel)) {
+        clearInterval(interval);
+        clearTimeout(timeout);
+        resolve();
+      }
+    }, 500);
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      resolve();
+    }, 25000);
   });
 }
 
-function initScraper() {
-  const container = document.querySelector('main');
-  if (!container) {
-    return setTimeout(initScraper, 500);
-  }
+function logTurn(turn, idx) {
+  const text      = extractText(turn);
+  const rawSender = getSender(turn);
+  // 2) Map "assistant" → "chatbot", leave "user"
+  const senderType = rawSender === 'assistant' ? 'chatbot' : 'user';
+  const messageId  = turn.getAttribute('data-testid');
 
-  const mo = new MutationObserver(() => {
-    const bubbles = Array.from(container.querySelectorAll('.group'));
-    if (bubbles.length <= seenBubbles) return;
+  console.log(`[CS] bubble #${idx} (${rawSender}):`, text);
 
-    for (let i = seenBubbles; i < bubbles.length; i++) {
-      const bubble = bubbles[i];
-      const text   = bubble.innerText.trim();
-      if (!text) continue;
+  chrome.runtime.sendMessage({
+    type: 'NEW_MESSAGE',
+    data: {
+      conversation_id: conversationId,
+      message_id:      messageId,
+      sender_type:     senderType,
+      content:         text,
+      order_index:     idx
+    }
+  });
+}
 
-      const sender = bubble.classList.contains('user') ? 'user' : 'assistant';
-      console.log(`[CS] Detected bubble #${i}`, { sender, text });
+function enqueueNew() {
+  getTurns().forEach((turn, idx) => {
+    const id = turn.getAttribute('data-testid');
+    if (id && !seenIds.has(id)) {
+      seenIds.add(id);
+      queue.push({ turn, idx });
+    }
+  });
+  processQueue();
+}
 
-      if (i === 0) {
-        // FIRST bubble: create the conversation, then send the message
-        send('NEW_CHAT', { title: text.substring(0, 100) }, resp => {
-          if (resp.status === 'ok') {
-            // now that we have a conversation, send the first message
-            send('NEW_MESSAGE', {
-              sender_type: sender,
-              content: text,
-              order_index: i
-            });
-          } else {
-            console.error('[CS] NEW_CHAT failed, skipping first NEW_MESSAGE', resp);
-          }
-        });
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+  while (queue.length) {
+    const { turn, idx } = queue.shift();
+    if (getSender(turn) === 'assistant') {
+      const md = turn.querySelector('div.prose, div.markdown');
+      if (md) {
+        const obs = new MutationObserver(() => logTurn(turn, idx));
+        obs.observe(md, { childList: true, subtree: true, characterData: true });
+        await waitForAssistantComplete(turn);
+        obs.disconnect();
       } else {
-        // Subsequent bubbles fire immediately
-        send('NEW_MESSAGE', {
-          sender_type: sender,
-          content: text,
-          order_index: i
-        });
+        await waitForAssistantComplete(turn);
       }
     }
-
-    seenBubbles = bubbles.length;
-  });
-
-  mo.observe(container, { childList: true, subtree: true });
+    logTurn(turn, idx);
+  }
+  processing = false;
 }
 
-// Kick things off
-initScraper();
+function observeNew() {
+  new MutationObserver(enqueueNew).observe(document.body, {
+    childList:    true,
+    subtree:      true,
+    characterData:true
+  });
+}
+
+// bootstrap
+enqueueNew();
+observeNew();
+startConversation(conversationId);
+
